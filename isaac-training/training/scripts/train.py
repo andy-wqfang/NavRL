@@ -22,6 +22,7 @@ FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cfg")
 def main(cfg):
     # Simulation App
     sim_app = SimulationApp({"headless": cfg.headless, "anti_aliasing": 1})
+    wandb_cfg = OmegaConf.to_container(cfg, resolve=True)
 
     # Use Wandb to monitor training
     if (cfg.wandb.run_id is None):
@@ -29,7 +30,7 @@ def main(cfg):
             project=cfg.wandb.project,
             name=f"{cfg.wandb.name}/{datetime.datetime.now().strftime('%m-%d_%H-%M')}",
             entity=cfg.wandb.entity,
-            config=cfg,
+            config=wandb_cfg,
             mode=cfg.wandb.mode,
             id=wandb.util.generate_id(),
         )
@@ -38,7 +39,7 @@ def main(cfg):
             project=cfg.wandb.project,
             name=f"{cfg.wandb.name}/{datetime.datetime.now().strftime('%m-%d_%H-%M')}",
             entity=cfg.wandb.entity,
-            config=cfg,
+            config=wandb_cfg,
             mode=cfg.wandb.mode,
             id=cfg.wandb.run_id,
             resume="must"

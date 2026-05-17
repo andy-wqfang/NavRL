@@ -21,6 +21,7 @@
 # SOFTWARE.
 
 
+import inspect
 import torch
 from typing import Optional, Tuple, List
 from contextlib import contextmanager
@@ -65,17 +66,35 @@ class ArticulationView(_ArticulationView):
         shape: Tuple[int, ...] = (-1,),
     ) -> None:
         self.shape = shape
-        super().__init__(
-            prim_paths_expr,
-            name,
-            positions,
-            translations,
-            orientations,
-            scales,
-            visibilities,
-            reset_xform_properties,
-            enable_dof_force_sensors,
+        self._supports_force_sensor_arg = (
+            "enable_dof_force_sensors" in inspect.signature(_ArticulationView.__init__).parameters
         )
+        if self._supports_force_sensor_arg:
+            super().__init__(
+                prim_paths_expr,
+                name,
+                positions,
+                translations,
+                orientations,
+                scales,
+                visibilities,
+                reset_xform_properties,
+                enable_dof_force_sensors,
+            )
+        else:
+            # Isaac Sim 4.2+ removed `enable_dof_force_sensors` from ArticulationView.__init__.
+            # Keep the legacy argument on this shim, but let newer parents initialize themselves.
+            self._enable_dof_force_sensors = enable_dof_force_sensors
+            super().__init__(
+                prim_paths_expr,
+                name,
+                positions,
+                translations,
+                orientations,
+                scales,
+                visibilities,
+                reset_xform_properties,
+            )
     
     @require_sim_initialized
     def initialize(self, physics_sim_view: omni.physics.tensors.SimulationView = None) -> None:
@@ -84,6 +103,10 @@ class ArticulationView(_ArticulationView):
         Args:
             physics_sim_view (omni.physics.tensors.SimulationView, optional): current physics simulation view. Defaults to None.
         """
+        if not self._supports_force_sensor_arg:
+            # On newer Isaac Sim versions, the parent implementation also handles the
+            # list-valued `_regex_prim_paths` layout introduced after the Orbit era.
+            return super().initialize(physics_sim_view)
         if physics_sim_view is None:
             physics_sim_view = omni.physics.tensors.create_simulation_view(self._backend)
             physics_sim_view.set_subspace_roots("/")
@@ -246,7 +269,10 @@ class ArticulationView(_ArticulationView):
             return None
 
     def get_world_poses(
-        self, env_indices: Optional[torch.Tensor] = None, clone: bool = True
+        self,
+        env_indices: Optional[torch.Tensor] = None,
+        clone: bool = True,
+        usd: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         indices = self._resolve_env_indices(env_indices)
         if self._physics_view is not None:
@@ -257,7 +283,10 @@ class ArticulationView(_ArticulationView):
                 poses = poses.clone()
             return poses[..., :3], poses[..., [6, 3, 4, 5]]
         else:
-            pos, rot = super().get_world_poses(indices, clone)
+            if "usd" in inspect.signature(_ArticulationView.get_world_poses).parameters:
+                pos, rot = super().get_world_poses(indices, clone, usd)
+            else:
+                pos, rot = super().get_world_poses(indices, clone)
             return pos.unflatten(0, self.shape), rot.unflatten(0, self.shape)
 
     def set_world_poses(
@@ -461,10 +490,16 @@ class RigidPrimView(_RigidPrimView):
         return self
 
     def get_world_poses(
-        self, env_indices: Optional[torch.Tensor] = None, clone: bool = True
+        self,
+        env_indices: Optional[torch.Tensor] = None,
+        clone: bool = True,
+        usd: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         indices = self._resolve_env_indices(env_indices)
-        pos, rot = super().get_world_poses(indices, clone)
+        if "usd" in inspect.signature(_RigidPrimView.get_world_poses).parameters:
+            pos, rot = super().get_world_poses(indices, clone, usd)
+        else:
+            pos, rot = super().get_world_poses(indices, clone)
         return pos.unflatten(0, self.shape), rot.unflatten(0, self.shape)
 
     def set_world_poses(
